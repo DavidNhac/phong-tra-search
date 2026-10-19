@@ -14,7 +14,7 @@ import re
 from bs4 import BeautifulSoup
 
 from .config import CLEAN_DIR, EXTRACT_DIR, RAW_DIR
-from .utils import content_hash, iter_manifest_documents, normalize_text, write_jsonl
+from .utils import LINE_BREAK_TOKEN, content_hash, iter_manifest_documents, normalize_text, write_jsonl
 
 log = logging.getLogger("extract")
 
@@ -23,9 +23,13 @@ BLOCKS = TEXT_BLOCKS + ["img"]  # img đi chung dòng thời gian để biết �
 HEADING_LEVEL = {"h1": 1, "h2": 2, "h3": 3, "h4": 4}
 ADDR_RE = re.compile(r"^(?:Địa chỉ|Địa điểm|Add(?:ress)?)\s*:\s*(.*)$", re.I)
 BRANCH_RE = re.compile(r"^(?:CN|Cơ sở|Chi nhánh)\s*\d*\s*:\s*(.+)$", re.I)
-HOURS_RE = re.compile(r"^(?:Giờ mở cửa|Giờ hoạt động|Thời gian mở cửa|Mở cửa)\s*:\s*(.+)$", re.I)
-PRICE_RE = re.compile(r"^(?:Giá(?: đồ uống)?(?: từ)?|Mức giá|Giá vé)\s*:\s*(.+)$", re.I)
+HOURS_RE = re.compile(r"^(?:Giờ mở cửa|Giờ hoạt động|Thời gian mở cửa|Mở cửa)\s*:\s*(.*)$", re.I)
+PRICE_RE = re.compile(r"^(?:Giá(?: đồ uống)?(?: từ)?|Mức giá|Giá vé)\s*:\s*(.*)$", re.I)
 MIN_DOC_CHARS = 200
+
+
+def _text_lines(el) -> list[str]:
+    return [line for raw in el.get_text().split(LINE_BREAK_TOKEN) if (line := normalize_text(raw))]
 
 
 def _blocks(root):
@@ -49,6 +53,8 @@ def build_sections(clean_html: str, src: dict) -> list[dict]:
         if cur["paragraphs"] or cur["images"]:
             sections.append({**cur, "paragraphs": list(cur["paragraphs"]), "images": list(cur["images"])})
 
+    venue_heading_re = re.compile(src["venue_heading_regex"]) if src.get("venue_heading_regex") else None
+
     for el in _blocks(root):
         if el.name == "img":
             # ảnh thuộc về section (heading) đang mở, tức là quán đang được nhắc tới
@@ -56,32 +62,61 @@ def build_sections(clean_html: str, src: dict) -> list[dict]:
             if url and all(i["src"] != url for i in cur["images"]):
                 cur["images"].append({"src": url, "alt": el.get("alt", ""), "caption": el.get("data-caption", "")})
             continue
-        text = normalize_text(el.get_text())
-        text = re.sub(r"^[•\-–·▪]\s*", "", text)
-        if not text:
-            continue
-        if any(p.search(text) for p in cut):
-            break  # từ đây trở xuống là quảng cáo / bài liên quan
-        if any(p.search(text) for p in drop):
-            continue
+        lines = _text_lines(el)
         if el.name in HEADING_LEVEL:
-            if el.name == "h1":
-                continue  # h1 = tiêu đề trang, lấy từ meta
-            flush()
-            cur = {"heading": text, "level": HEADING_LEVEL[el.name], "paragraphs": [], "images": []}
-        elif not cur["paragraphs"] or cur["paragraphs"][-1] != text:
-            cur["paragraphs"].append(text)
+            lines = [normalize_text(" ".join(lines))]
+        block_lines = []
+        for text in lines:
+            text = re.sub(r"^[•\-–·▪]\s*", "", text)
+            if not text:
+                continue
+            if any(p.search(text) for p in cut):
+                flush()
+                return sections
+            if any(p.search(text) for p in drop):
+                continue
+            if el.name in HEADING_LEVEL:
+                if el.name == "h1":
+                    continue  # h1 = tiêu đề trang, lấy từ meta
+                is_venue = venue_heading_re and venue_heading_re.match(cur["heading"] or "")
+                if is_venue and HEADING_LEVEL[el.name] > cur["level"]:
+                    if not cur["paragraphs"] or cur["paragraphs"][-1] != text:
+                        cur["paragraphs"].append(text)
+                    continue
+                flush()
+                cur = {"heading": text, "level": HEADING_LEVEL[el.name], "paragraphs": [], "images": []}
+            else:
+                block_lines.append(text)
+        if block_lines:
+            text = "\n".join(block_lines)
+            if not cur["paragraphs"] or cur["paragraphs"][-1] != text:
+                cur["paragraphs"].append(text)
     flush()
     return sections
 
 
 def parse_venues(sections: list[dict], src: dict, doc: dict) -> list[dict]:
     pattern = src.get("venue_heading_regex")
-    if not pattern:
+    if pattern:
+        heading_re = re.compile(pattern)
+        venue_sections = sections
+    elif src.get("venue_name"):
+        paragraphs = []
+        for section in sections:
+            if section.get("heading"):
+                paragraphs.append(section["heading"])
+            paragraphs.extend(section.get("paragraphs", []))
+        venue_sections = [{
+            "heading": f"1. {src['venue_name']}",
+            "level": 2,
+            "paragraphs": paragraphs,
+            "images": [],
+        }]
+        heading_re = re.compile(r"^\s*(\d{1,2})\.\s*(.+)$")
+    else:
         return []
-    heading_re = re.compile(pattern)
     venues = []
-    for sec in sections:
+    for sec in venue_sections:
         m = heading_re.match(sec["heading"] or "")
         if not m or sec["level"] not in (2, 3):
             continue
@@ -92,22 +127,60 @@ def parse_venues(sections: list[dict], src: dict, doc: dict) -> list[dict]:
 
         addresses, body = [], []
         hours, price = None, None
-        for p in sec["paragraphs"]:
-            a = ADDR_RE.match(p)
-            b = BRANCH_RE.match(p)
-            h = HOURS_RE.match(p)
-            pr = PRICE_RE.match(p)
-            if h:
-                hours = h.group(1).strip()
-            elif pr:
-                price = pr.group(1).strip()
-            elif a:
-                if a.group(1).strip():
-                    addresses.append(a.group(1).strip())
-            elif b:
-                addresses.append(b.group(0).strip())
-            else:
-                body.append(p)
+        for paragraph in sec["paragraphs"]:
+            pending_field = None
+            lines = [normalize_text(line) for line in paragraph.splitlines()]
+            lines = [line for line in lines if line]
+            index = 0
+            while index < len(lines):
+                p = lines[index]
+                index += 1
+                if not p:
+                    continue
+                if pending_field:
+                    if any(pattern.match(p) for pattern in (ADDR_RE, BRANCH_RE, HOURS_RE, PRICE_RE)):
+                        pending_field = None
+                    else:
+                        if pending_field == "address":
+                            addresses.append(p)
+                        elif pending_field == "hours":
+                            hours = p
+                        elif pending_field == "price":
+                            price = p
+                        pending_field = None
+                        continue
+                a = ADDR_RE.match(p)
+                b = BRANCH_RE.match(p)
+                h = HOURS_RE.match(p)
+                pr = PRICE_RE.match(p)
+                if h:
+                    hours = h.group(1).strip() or None
+                    pending_field = "hours" if not hours else None
+                elif pr:
+                    price = pr.group(1).strip() or None
+                    pending_field = "price" if not price else None
+                elif a:
+                    address = a.group(1).strip()
+                    if address:
+                        address_parts = [address]
+                        while index < len(lines) and not any(
+                            pattern.match(lines[index]) for pattern in (ADDR_RE, BRANCH_RE, HOURS_RE, PRICE_RE)
+                        ):
+                            address_parts.append(lines[index])
+                            index += 1
+                        addresses.append(" ".join(address_parts))
+                    else:
+                        pending_field = "address"
+                elif b:
+                    addresses.append(b.group(0).strip())
+                else:
+                    body.append(p)
+
+        if not addresses and src.get("venue_name"):
+            addresses = list(src.get("venue_addresses", []))
+
+        if not addresses:
+            log.warning("Không trích xuất được địa chỉ cho venue %r trong %s", name, doc.get("url"))
 
         text_parts = [f"{name}. {tagline}".strip(". ").strip() + "."]
         if addresses:

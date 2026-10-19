@@ -136,6 +136,16 @@ def enrich(venues, docs, defaults_cfg, sources_cfg, fetcher, images_root, rel_ro
                 continue
             ok += process(it, v["source"], v["url"], cfg)["status"] == "ok"
 
+    source_venue_images = {}
+    for v in venues:
+        if only is not None and v["source"] not in only:
+            continue
+        for image in v.get("images", []):
+            source_venue_images[(v["source"], image["src"])] = {
+                key: value for key, value in image.items() if key != "src"
+            }
+
+    sources_with_venues = {v["source"] for v in venues}
     for d in docs:
         if only is not None and d["source"] not in only:
             continue
@@ -146,7 +156,14 @@ def enrich(venues, docs, defaults_cfg, sources_cfg, fetcher, images_root, rel_ro
             process(d["cover_image"], d["source"], d["url"], cfg)
         for s in d.get("sections", []):
             for it in s.get("images", []):
-                process(it, d["source"], d["url"], cfg)
+                result = source_venue_images.get((d["source"], it["src"]))
+                if result is not None:
+                    it.update(result)
+                elif d["source"] not in sources_with_venues:
+                    process(it, d["source"], d["url"], cfg)
+                else:
+                    for field in ("status", "error", "local_path", "width", "height", "bytes", "sha1", "content_type"):
+                        it.pop(field, None)
     return stats
 
 

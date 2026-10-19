@@ -9,6 +9,7 @@ from typing import Iterable, Iterator
 from urllib.parse import urldefrag
 
 _ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿­"), None)
+LINE_BREAK_TOKEN = "\ue000"
 
 
 def normalize_url(url: str) -> str:
@@ -55,10 +56,10 @@ def write_jsonl(path: Path, rows: Iterable[dict]) -> int:
 
 
 def iter_manifest_documents(raw_dir: Path, source_name: str) -> Iterator[dict]:
-    """Các trang role=document, fetch thành công; lấy bản ghi mới nhất cho mỗi URL."""
+    """Lấy bản ghi fetch thành công mới nhất cho mỗi URL, bỏ qua lần fetch thất bại sau đó."""
     latest: dict[str, dict] = {}
     for row in read_jsonl(raw_dir / source_name / "manifest.jsonl"):
-        latest[row["url"]] = row
-    for row in latest.values():
         if row.get("role") == "document" and row.get("status") == 200:
-            yield row
+            latest[row["url"]] = row
+    for row in latest.values():
+        yield row

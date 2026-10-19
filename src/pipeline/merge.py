@@ -38,6 +38,12 @@ ADDR_STOP = {  # từ chỉ loại đơn vị, không giúp phân biệt địa 
     "so", "ngo", "ngach", "hem", "pho", "duong", "phuong", "quan", "huyen", "xa", "tp", "thanh", "tang", "toa", "nha",
 }
 HOURS_RE = re.compile(r"(\d{1,2})\s*h\s*(\d{2})?\s*[-–—]\s*(\d{1,2})\s*h\s*(\d{2})?")
+EMBEDDING_FIELD_LINES = {
+    "addresses": re.compile(r"(?im)^\s*(?:địa chỉ|address)\s*:\s*.*(?:\n|$)"),
+    "opening_hours": re.compile(r"(?im)^\s*(?:giờ mở cửa|giờ|opening hours)\s*:\s*.*(?:\n|$)"),
+    "price_text": re.compile(r"(?im)^\s*(?:giá(?: đồ uống)?(?: từ)?|mức giá|giá vé)\s*:\s*.*(?:\n|$)"),
+}
+OVERRIDABLE_FIELDS = {"addresses", "opening_hours", "price_text"}
 
 
 # ---------------------------------------------------------------- chuẩn hoá văn bản
@@ -83,14 +89,19 @@ def suspicious_hours(h: str | None) -> bool:
     return start < end <= 12
 
 
+ADMIN_SEG = re.compile(r"^(?:phuong\b|p\.\s*|quan\b|q\.\s*|huyen\b|xa\b|tp\b|thanh pho\b|ha noi\b|viet nam\b)")
+BUILDING_SEG = re.compile(r"^(tang|toa|nha|lau|khu|tttm|trung tam)\b")
+
+
 def street_segment(a: str) -> str:
-    """Phần 'số nhà + đường/ngõ' của địa chỉ. Bỏ tên phường/quận vì hai nguồn thường ghi khác nhau
-    (địa giới Hà Nội đã đổi tên), nên so cả chuỗi sẽ bị nhiễu."""
+    """Phần 'số nhà + đường/ngõ' của địa chỉ. Bỏ đoạn hành chính (phường/quận/Hà Nội) và đoạn
+    tầng/tòa nhà vì hai nguồn hay ghi khác nhau; các đoạn còn lại ghép lại, nên
+    'Số 38, ngõ 106, Hoàng Quốc Việt' và 'Số 38 ngõ 106 Hoàng Quốc Việt' ra cùng kết quả."""
     segs = [x.strip() for x in re.sub(r"\(.*?\)", " ", a).split(",") if x.strip()]
-    with_digit = [x for x in segs if re.search(r"\d", x)]
-    if with_digit:  # vd "Tầng M, Tòa nhà X, 165 Thái Hà": lấy đoạn có số nhà và nhiều chữ nhất
-        return max(with_digit, key=lambda x: len(re.findall(r"[a-z0-9]+", fold(x))))
-    return segs[0] if segs else ""
+    keep = [x for x in segs if not ADMIN_SEG.match(fold(x)) and not BUILDING_SEG.match(fold(x))]
+    if not keep:
+        keep = segs[:1]
+    return " ".join(keep)
 
 
 def addr_tokens(a: str) -> set[str]:
@@ -158,17 +169,51 @@ def _first(members: list[dict], field: str):
     return next((m[field] for m in members if m.get(field)), None)
 
 
+def _validated_overrides(overrides: dict | None, aliases: dict[str, str]) -> dict[str, dict]:
+    if overrides is None:
+        return {}
+    if not isinstance(overrides, dict):
+        raise ValueError("'overrides' trong venue_aliases.yaml phải là một object.")
+
+    validated = {}
+    for name, values in overrides.items():
+        if not isinstance(name, str) or not isinstance(values, dict):
+            raise ValueError("Mỗi override phải có dạng tên quán: {field: value}.")
+        unknown = set(values) - OVERRIDABLE_FIELDS
+        if unknown:
+            raise ValueError(f"Trường override không được hỗ trợ cho {name!r}: {sorted(unknown)}")
+        for field in ("opening_hours", "price_text"):
+            if field in values and values[field] is not None and not isinstance(values[field], str):
+                raise ValueError(f"Override {field} của {name!r} phải là chuỗi hoặc null.")
+        if "addresses" in values and (
+            not isinstance(values["addresses"], list)
+            or any(not isinstance(address, str) for address in values["addresses"])
+        ):
+            raise ValueError(f"Override addresses của {name!r} phải là danh sách chuỗi.")
+        validated[slugify(clean_name(name, aliases))] = dict(values)
+    return validated
+
+
+def _embedding_text(rec: dict, overridden_fields: set[str]) -> str:
+    text = rec.get("text") or ""
+    for field, pattern in EMBEDDING_FIELD_LINES.items():
+        if field in overridden_fields:
+            text = pattern.sub("", text)
+    return text.strip()
+
+
 def merge_venues(records: list[dict], source_order: list[str], aliases: dict[str, str] | None = None,
-                 force_merge: list[str] | None = None) -> tuple[list[dict], dict]:
+                 force_merge: list[str] | None = None, overrides: dict | None = None) -> tuple[list[dict], dict]:
     aliases = {fold(normalize_text(k)): v for k, v in (aliases or {}).items()}
     force = {slugify(clean_name(x, aliases)) for x in (force_merge or [])}
+    overrides_by_slug = _validated_overrides(overrides, aliases)
     order = {s: i for i, s in enumerate(source_order)}
     recs = sorted(
         (_prepare(r, aliases) for r in records),
         key=lambda r: (order.get(r["source"], 99), r.get("rank_in_article", 0)),
     )
 
-    report: dict = {"records_in": len(recs), "address_conflicts": [], "field_conflicts": []}
+    report: dict = {"records_in": len(recs), "address_conflicts": [], "field_conflicts": [], "overrides_applied": []}
 
     # 1) gom theo slug tên, rồi tách theo địa chỉ
     by_slug: dict[str, list[dict]] = defaultdict(list)
@@ -213,22 +258,41 @@ def merge_venues(records: list[dict], source_order: list[str], aliases: dict[str
                 report["field_conflicts"].append(
                     {"venue_key": key, "field": field, "values": {m["source"]: m[field] for m in members if m.get(field)}}
                 )
+        manual_overrides = overrides_by_slug.get(slug, {})
+        addresses = _merge_addresses(members)
+        if "addresses" in manual_overrides:
+            addresses = manual_overrides["addresses"]
+        if "opening_hours" in manual_overrides:
+            hours = manual_overrides["opening_hours"]
+        if "price_text" in manual_overrides:
+            price = manual_overrides["price_text"]
+        if manual_overrides:
+            report["overrides_applied"].append({"venue_key": key, "fields": sorted(manual_overrides)})
         merged.append(
             {
                 "venue_key": key,
                 "canonical_name": best["clean_name"],
                 "aliases": names,
-                "addresses": _merge_addresses(members),
+                "addresses": addresses,
+                "source_addresses": [
+                    {"address": address, "source": m["source"], "venue_id": m.get("venue_id")}
+                    for m in members
+                    for address in m.get("addresses", [])
+                ],
                 "opening_hours": hours,
                 "price_text": price,
+                "manual_overrides": manual_overrides,
                 "taglines": sorted({m["tagline"] for m in members if m.get("tagline")}),
                 "images": _merge_images(members),
                 "published_at": max((m["published_at"] for m in members if m.get("published_at")), default=None),
                 "n_sources": len({m["source"] for m in members}),
                 "source_records": [
-                    {k: m.get(k) for k in (
-                        "venue_id", "source", "url", "rank_in_article", "raw_name", "tagline", "addresses",
-                        "opening_hours", "price_text", "description", "text", "fetched_at")}
+                    {
+                        **{k: m.get(k) for k in (
+                            "venue_id", "source", "url", "rank_in_article", "raw_name", "tagline", "addresses",
+                            "opening_hours", "price_text", "description", "text", "fetched_at")},
+                        "embedding_text": _embedding_text(m, set(manual_overrides)),
+                    }
                     for m in members
                 ],
             }
@@ -259,11 +323,11 @@ def merge_venues(records: list[dict], source_order: list[str], aliases: dict[str
     return merged, report
 
 
-def load_aliases(path: Path = ALIASES_PATH) -> tuple[dict, list]:
+def load_aliases(path: Path = ALIASES_PATH) -> tuple[dict, list, dict]:
     if not path.exists():
-        return {}, []
+        return {}, [], {}
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return data.get("aliases") or {}, data.get("force_merge") or []
+    return data.get("aliases") or {}, data.get("force_merge") or [], data.get("overrides") or {}
 
 
 def run_merge(source_order: list[str], aliases_path: Path = ALIASES_PATH) -> dict:
@@ -272,12 +336,12 @@ def run_merge(source_order: list[str], aliases_path: Path = ALIASES_PATH) -> dic
         raise SystemExit("Chưa có data/03_extracted/venues.jsonl - hãy chạy extract (và images) trước.")
     if any("status" not in i for r in records for i in r.get("images", [])):
         log.warning("Có ảnh chưa được tải (chưa chạy bước images?): ảnh sẽ không có trong kết quả gộp.")
-    aliases, force = load_aliases(aliases_path)
-    merged, report = merge_venues(records, source_order, aliases, force)
+    aliases, force, overrides = load_aliases(aliases_path)
+    merged, report = merge_venues(records, source_order, aliases, force, overrides)
 
     MERGED_DIR.mkdir(parents=True, exist_ok=True)
     write_jsonl(MERGED_DIR / "venues_merged.jsonl", merged)
     (MERGED_DIR / "merge_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return {k: report[k] for k in (
         "records_in", "venues_out", "merged_groups", "address_conflicts", "possible_duplicates",
-        "same_address_different_name", "hours_to_review", "field_conflicts")}
+        "same_address_different_name", "hours_to_review", "field_conflicts", "overrides_applied")}

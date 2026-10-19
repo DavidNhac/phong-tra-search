@@ -14,14 +14,13 @@ import json
 import logging
 import re
 from collections import defaultdict
-from pathlib import Path
 
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, Comment, Tag
 
 from .config import CLEAN_DIR, RAW_DIR
-from .utils import iter_manifest_documents, normalize_text
+from .utils import LINE_BREAK_TOKEN, iter_manifest_documents, normalize_text
 
 log = logging.getLogger("clean")
 
@@ -34,6 +33,10 @@ STRIP_TAGS = [
 HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"]
 MIN_CONTAINER_CHARS = 300
 DATE_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b")
+DATA_LABEL_RE = re.compile(
+    r"(?i)^\s*(?:địa chỉ|địa điểm|address|giờ mở cửa|giờ hoạt động|thời gian mở cửa|mở cửa|"
+    r"giờ|giá(?: đồ uống)?(?: từ)?|mức giá|giá vé)\s*:"
+)
 
 
 # ---------------------------------------------------------------- helpers
@@ -47,6 +50,10 @@ def _link_density(el: Tag) -> float:
         return 0.0
     link = sum(len(normalize_text(a.get_text(" "))) for a in el.find_all("a"))
     return min(1.0, link / total)
+
+
+def _contains_data_label(el: Tag) -> bool:
+    return any(DATA_LABEL_RE.match(normalize_text(line)) for line in el.get_text("\n").splitlines())
 
 
 def _decomposed(el: Tag) -> bool:
@@ -250,7 +257,12 @@ def clean_html(html: str, src: dict, base_url: str = "") -> tuple[str, dict]:
     for el in reversed(container.find_all(["ul", "ol", "div", "section", "p", "li", "span"])):
         if _decomposed(el):
             continue
-        if _text_len(el) <= 600 and _link_density(el) >= 0.7 and not el.find(HEADINGS):
+        if (
+            _text_len(el) <= 600
+            and _link_density(el) >= 0.7
+            and not el.find(HEADINGS)
+            and not _contains_data_label(el)
+        ):
             el.decompose()
     for a in container.find_all("a"):
         a.unwrap()
@@ -263,7 +275,7 @@ def clean_html(html: str, src: dict, base_url: str = "") -> tuple[str, dict]:
         ):
             el.decompose()
     for br in container.find_all("br"):
-        br.replace_with("\n")
+        br.replace_with(LINE_BREAK_TOKEN)
 
     out = (
         "<!doctype html><html><head><meta charset='utf-8'></head><body>"

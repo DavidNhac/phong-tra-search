@@ -8,5 +8,18 @@ aliases:
 
 # Tên chuẩn (sau khi áp alias) mà bạn chắc chắn là CÙNG một quán dù địa chỉ hai nguồn ghi khác hẳn nhau.
 # Mặc định merge chỉ gộp khi tên khớp VÀ địa chỉ không mâu thuẫn.
-force_merge: []
-#  - "Hay Bar"
+force_merge:
+  - "Polygon Musik" # Nguồn Lữ Hành dùng địa chỉ cũ; địa chỉ hiện tại được đặt bên dưới.
+
+# Ghi đè dữ liệu sau khi gộp. Có thể đặt null để không phát hành giá trị chưa xác minh.
+# Khi ghi đè địa chỉ/giờ, embedding_text trong source_records sẽ bỏ các dòng dữ liệu nguồn tương ứng;
+# text gốc vẫn được giữ để truy vết.
+overrides:
+  "Hay Bar":
+    opening_hours: null
+  "Sweet Home Lounge":
+    opening_hours: null
+  "Polygon Musik":
+    # Địa chỉ Google Maps và bài đăng Facebook gần đây; nguồn Lữ Hành còn lưu địa chỉ cũ trong source_records.
+    addresses:
+      - "29 ngách 31 ngõ 167 Tây Sơn, phường Kim Liên, Hà Nội"

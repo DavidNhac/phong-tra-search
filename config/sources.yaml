@@ -113,3 +113,38 @@ sources:
       - '(?i)^\s*(tin liên quan|các tin cùng chuyên mục|tin xem nhiều)'
 
     venue_heading_regex: '^\s*(\d{1,2})[.)]\s*(.+)$'
+
+  # ---------------------------------------------------------------
+  # 3) Trixie: trang chính thức của địa điểm, dùng để đối chiếu thông tin của chính quán.
+  # ---------------------------------------------------------------
+  - name: trixie_official
+    type: single_venue
+    seeds:
+      - https://trixie.com.vn/phong-tra-ha-noi
+    discover_links: false
+    allowed_domains: [trixie.com.vn]
+    venue_name: Trixie Cafe & Lounge
+    # Địa chỉ hiện hành được trang chính thức nêu trong mô tả meta, không nằm trong vùng nội dung đã làm sạch.
+    venue_addresses:
+      - "165 Thái Hà, Đống Đa, Hà Nội"
+
+    content_selectors:
+      - "article"
+      - "[itemprop='articleBody']"
+      - "main"
+
+    remove_selectors:
+      - "header"
+      - "footer"
+      - "nav"
+      - "aside"
+      - "form"
+      - "[class*='comment']"
+      - "[class*='related']"
+      - "[class*='banner']"
+
+    drop_text_patterns:
+      - '(?i)^\s*(fanpage|menu|đặt bàn)\s*$'
+    images:
+      enabled: false
+      download_cover: false

@@ -160,5 +160,81 @@ def test_address_matching_ignores_ward_names_but_not_house_numbers():
 
     assert addr_similar("236 Hàng Bông, phường Cửa Nam, Hà Nội", "Số 236 Hàng Bông, Hoàn Kiếm, Hà Nội")
     assert addr_similar("Tầng M, Tòa nhà Sông Hồng, 165 Thái Hà, Hà Nội", "165 Thái Hà, phường Đống Đa")
+    assert addr_similar("165 Thái Hà, phường Đống Đa, Hà Nội",
+                        "Tầng M, Tòa nhà Sông Hồng, 165 Thái Hà, Q. Đống Đa, Hà Nội.")
+    assert addr_similar("19 Hàng Khay, phường Cửa Nam, Hà Nội",
+                        "19 Hàng Khay, P. Tràng Tiền, Q. Hoàn kiếm, Hà Nội.")
     assert not addr_similar("10 Hàng Bông, Hà Nội", "236 Hàng Bông, Hà Nội")   # cùng phố, khác số nhà
     assert not addr_similar("19 Hàng Khay, Hà Nội", "236 Hàng Bông, Hà Nội")
+
+
+def test_addr_similar_comma_separated_variants():
+    from src.pipeline.merge import addr_similar
+    assert addr_similar("Số 38 ngõ 106 Hoàng Quốc Việt, phường Nghĩa Đô, Hà Nội",
+                        "Số 38, ngõ 106, Hoàng Quốc Việt, Q. Cầu Giấy, Hà Nội.")
+    assert not addr_similar("số 29 ngách 31 ngõ 167 Tây Sơn, Hà Nội", "36 Cát Linh, Q. Đống Đa, Hà Nội.")
+
+
+def test_manual_overrides_null_unverified_hours_and_keep_source_provenance():
+    source = rec("luhanhvietnam", 1, "Hay Bar", ["12 Tạ Hiện, Hà Nội"], "7h00 – 11h30.")
+    source["text"] = "Hay Bar.\nĐịa chỉ: 12 Tạ Hiện, Hà Nội.\nGiờ mở cửa: 7h00 – 11h30.\nMô tả buổi tối."
+    merged, report = merge_venues(
+        [source],
+        ORDER,
+        overrides={"Hay Bar": {"opening_hours": None}},
+    )
+
+    venue = merged[0]
+    assert venue["opening_hours"] is None
+    assert venue["manual_overrides"] == {"opening_hours": None}
+    assert venue["source_records"][0]["opening_hours"] == "7h00 - 11h30"
+    assert "Giờ mở cửa: 7h00" not in venue["source_records"][0]["embedding_text"]
+    assert "Giờ mở cửa: 7h00" in venue["source_records"][0]["text"]
+    assert "Mô tả buổi tối." in venue["source_records"][0]["embedding_text"]
+    assert report["overrides_applied"] == [{"venue_key": "hay-bar", "fields": ["opening_hours"]}]
+
+
+def test_price_override_removes_labeled_price_from_embedding_text():
+    source = rec("luhanhvietnam", 1, "Hay Bar", ["12 Tạ Hiện, Hà Nội"], price="100.000đ.")
+    source["text"] = "Hay Bar.\nGiá: 100.000đ.\nMức giá: 120.000đ.\nGiá đồ uống từ: 90.000đ.\nMô tả."
+    merged, _ = merge_venues(
+        [source],
+        ORDER,
+        overrides={"Hay Bar": {"price_text": None}},
+    )
+
+    venue = merged[0]
+    assert venue["price_text"] is None
+    assert "100.000đ." in venue["source_records"][0]["text"]
+    assert all(
+        label not in venue["source_records"][0]["embedding_text"]
+        for label in ("Giá:", "Mức giá:", "Giá đồ uống từ:")
+    )
+    assert venue["source_records"][0]["embedding_text"].endswith("Mô tả.")
+
+
+def test_address_override_preserves_source_addresses_but_excludes_them_from_embedding_text():
+    vin = rec("vinpearl", 1, "Polygon Musik", ["29 ngách 31 ngõ 167 Tây Sơn, Hà Nội"])
+    vin["text"] = "Polygon Musik.\nĐịa chỉ: 29 ngách 31 ngõ 167 Tây Sơn, Hà Nội.\nMô tả."
+    lh = rec("luhanhvietnam", 1, "Polygon Musik", ["36 Cát Linh, Hà Nội"])
+    lh["text"] = "Polygon Musik.\nĐịa chỉ: 36 Cát Linh, Hà Nội.\nMô tả."
+    merged, _ = merge_venues(
+        [vin, lh],
+        ORDER,
+        force_merge=["Polygon Musik"],
+        overrides={"Polygon Musik": {"addresses": ["29 ngách 31 ngõ 167 Tây Sơn, phường Kim Liên, Hà Nội"]}},
+    )
+
+    venue = merged[0]
+    assert venue["addresses"] == ["29 ngách 31 ngõ 167 Tây Sơn, phường Kim Liên, Hà Nội"]
+    assert [(a["source"], a["address"]) for a in venue["source_addresses"]] == [
+        ("vinpearl", "29 ngách 31 ngõ 167 Tây Sơn, Hà Nội"),
+        ("luhanhvietnam", "36 Cát Linh, Hà Nội"),
+    ]
+    assert all("Địa chỉ:" not in record["embedding_text"] for record in venue["source_records"])
+    assert venue["source_records"][1]["text"].find("36 Cát Linh") >= 0
+
+
+def test_unknown_override_field_is_rejected():
+    with pytest.raises(ValueError, match="không được hỗ trợ"):
+        merge_venues(all_records(), ORDER, overrides={"Hay Bar": {"unknown": "value"}})

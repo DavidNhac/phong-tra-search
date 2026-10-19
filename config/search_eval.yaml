@@ -1,0 +1,21 @@
+queries:
+  - query: "Phòng trà chuyên nhạc Trịnh"
+    relevant_venue_keys: [trinh-ca]
+  - query: "Quán có mini show của ca sĩ Tuấn Hưng"
+    relevant_venue_keys: [sweet-home-lounge]
+  - query: "Nghe nhạc acoustic trong phố cổ"
+    relevant_venue_keys: [acoustic-cafe]
+  - query: "Bar nhạc sống sôi động ở Tạ Hiện"
+    relevant_venue_keys: [hay-bar]
+  - query: "Quán có ban nhạc trẻ biểu diễn ở Tây Sơn"
+    relevant_venue_keys: [polygon-musik]
+  - query: "Không gian nhà sàn và nhạc trữ tình cuối tuần"
+    relevant_venue_keys: [nha-san-art-cafe]
+  - query: "Phòng trà đầu tư sân khấu tổ chức show nghệ sĩ nổi tiếng"
+    relevant_venue_keys: [trixie-cafe-lounge]
+  - query: "Thưởng thức trà sen và trà hoa cúc nghe nhạc"
+    relevant_venue_keys: [hoa-tam-cac]
+  - query: "Quán yên tĩnh có nhiều chi nhánh"
+    relevant_venue_keys: [xom-cafe]
+  - query: "Địa điểm nhạc sống cho người trẻ ở Nguyễn Khang"
+    relevant_venue_keys: [g4u-cafe-ca-nhac]

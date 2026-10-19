@@ -14,6 +14,9 @@ CLEAN_DIR = DATA_DIR / "02_clean_html"    # HTML đã bỏ nhiễu, chỉ còn v
 EXTRACT_DIR = DATA_DIR / "03_extracted"   # JSONL có cấu trúc, đầu vào cho bước chunking
 IMAGES_DIR = EXTRACT_DIR / "images"       # ảnh đã tải: images/<source>/<sha1>.jpg + manifest.json
 MERGED_DIR = DATA_DIR / "04_merged"       # mỗi quán 1 bản ghi duy nhất sau khi gộp các nguồn
+TAGGED_DIR = DATA_DIR / "05_tagged"       # metadata chuẩn hoá cho lọc và chunking
+CHUNKS_DIR = DATA_DIR / "04_chunks"       # mỗi venue là một đơn vị ngữ nghĩa ban đầu
+EMBEDDINGS_DIR = DATA_DIR / "06_embeddings"
 ALIASES_PATH = ROOT / "config" / "venue_aliases.yaml"  # tuỳ chọn: ép tên chuẩn / ép gộp
 
 

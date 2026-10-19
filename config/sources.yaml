@@ -1,0 +1,115 @@
+# Cấu hình nguồn dữ liệu cho bước 1 (crawl -> clean -> extract).
+# Sửa file này khi muốn thêm trang mới, KHÔNG sửa code.
+
+defaults:
+  user_agent: "PhongTraSearchBot/0.1 (student project; contact: hi3n.fbi@gmail.com)"
+  delay_seconds: 2.0 # nghỉ giữa 2 request cùng domain
+  timeout_seconds: 20
+  max_retries: 3
+  respect_robots_txt: true
+
+sources:
+  # ---------------------------------------------------------------
+  # 1) Vinpearl: 1 bài listing "13 phòng trà Hà Nội", mỗi phòng trà là 1 thẻ H2 đánh số
+  # ---------------------------------------------------------------
+  - name: vinpearl
+    type: listing_article # 1 trang chứa nhiều địa điểm
+    seeds:
+      - https://vinpearl.com/vi/phong-tra-ha-noi
+    discover_links: false # chỉ crawl đúng URL đã cho
+    allowed_domains: [vinpearl.com]
+
+    # Thử lần lượt các selector này để tìm vùng nội dung chính.
+    # Nếu không selector nào khớp -> fallback sang heuristic mật độ văn bản.
+    # (Mình chưa xem được class thật của site, hãy mở DevTools xác nhận rồi chỉnh.)
+    content_selectors:
+      - "article"
+      - "[itemprop='articleBody']"
+      - ".post-content"
+      - ".article-content"
+      - ".news-detail"
+      - "main"
+
+    # Xoá trước khi lấy nội dung (nhiễu: menu, form đặt phòng, ưu đãi, bài liên quan...)
+    remove_selectors:
+      - "header"
+      - "footer"
+      - "nav"
+      - "aside"
+      - "form"
+      - ".breadcrumb"
+      - ".toc"
+      - ".table-of-content"
+      - ".related-posts"
+      - ".share"
+      - "[class*='promotion']"
+      - "[class*='booking']"
+      - "[class*='related']"
+      - "[class*='share']"
+      - ".widget-toc"
+
+    # Đoạn văn khớp regex nào thì bỏ riêng đoạn đó
+    drop_text_patterns:
+      - '^\s*>>>' # "***>>> Truy lùng 19 quán cafe..."
+      - "^Mục lục$"
+      - "^Đóng$"
+      - "Thông tin trong bài mang tính chất tổng hợp"
+      - '^\d{1,3}([.,]\d{3})*$' # số lượt xem "29.934"
+
+    # Gặp đoạn khớp regex này thì cắt bỏ nó và mọi thứ phía sau (phần quảng cáo cuối bài)
+    cut_after_patterns:
+      - "Sau khi khám phá các phòng trà Hà Nội"
+      - "VinWonders Wave Park"
+      - "Bài viết liên quan"
+
+    # Heading kiểu "1. Tên quán - mô tả" => 1 record địa điểm
+    venue_heading_regex: '^\s*(\d{1,2})\.\s*(.+)$'
+
+  # ---------------------------------------------------------------
+  # 2) Lữ Hành Việt Nam: 1 bài blog "Top những phòng trà ở Hà Nội"
+  #    H3 đánh số "1." -> "10.", mỗi quán có các dòng nhãn: Địa chỉ / Giờ mở cửa / Giá từ
+  # ---------------------------------------------------------------
+  - name: luhanhvietnam
+    type: listing_article
+    seeds:
+      - https://luhanhvietnam.com.vn/du-lich/phong-tra-o-ha-noi.html
+    discover_links: false # chỉ crawl đúng bài này
+    allowed_domains: [luhanhvietnam.com.vn]
+
+    content_selectors: # chưa xác nhận class thật -> có fallback heuristic
+      - "[itemprop='articleBody']"
+      - ".detail-content"
+      - ".news-detail"
+      - ".content-detail"
+      - ".post-content"
+      - "article"
+      - "#content"
+
+    remove_selectors:
+      - "header"
+      - "footer"
+      - "nav"
+      - "aside"
+      - "form"
+      - "table" # khung "Xem thêm: Chùm tour du lịch Hà Nội"
+      - ".breadcrumb"
+      - "[class*='banner']"
+      - "[class*='quangcao']"
+      - "[class*='related']"
+      - "[class*='share']"
+      - "[class*='comment']"
+      - "[class*='tour']"
+      - "[class*='sidebar']"
+      - "[class*='toc']"
+
+    drop_text_patterns:
+      - "^Mục lục$"
+      - '(?i)^\s*xem thêm\s*:'
+      - '(?i)^\s*(lưu ngay|kinh nghiệm du lịch hà nội)'
+      - '\[(title|price|short|link|src|text_date_post)\]' # placeholder widget chưa điền
+      - '(?i)^\s*ảnh\s*:'
+    cut_after_patterns:
+      - '(?i)hà lê \(tổng hợp\)' # byline cuối bài
+      - '(?i)^\s*(tin liên quan|các tin cùng chuyên mục|tin xem nhiều)'
+
+    venue_heading_regex: '^\s*(\d{1,2})[.)]\s*(.+)$'

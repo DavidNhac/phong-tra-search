@@ -1,0 +1,55 @@
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Generated pipeline data
+data/*
+!data/**/
+!data/**/.gitkeep
+
+# Local models and vector storage
+models/
+embeddings/
+qdrant_storage/
+
+
+# Generated pipeline data
+data/01_raw_html/*
+data/02_clean_html/*
+data/03_extracted/*
+data/04_chunks/*
+data/04_merged/*
+data/05_tagged/*
+data/06_embeddings/*
+
+# Keep folder placeholders
+!data/01_raw_html/.gitkeep
+!data/02_clean_html/.gitkeep
+!data/03_extracted/.gitkeep
+!data/04_chunks/.gitkeep
+!data/04_merged/.gitkeep
+!data/05_tagged/.gitkeep
+!data/06_embeddings/.gitkeep
+
+# Ignore nested duplicate project
+/phong-tra-search/

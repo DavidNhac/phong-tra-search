@@ -1,0 +1,12 @@
+# Tuỳ chọn. Dùng khi bước merge chuẩn hoá tên chưa đúng ý.
+# Chạy lại:  python -m src.pipeline.run merge   (không cần crawl/extract lại)
+
+# Khoá = tên gốc trong bài (không phân biệt hoa/thường và dấu), giá trị = tên chuẩn.
+aliases:
+  "Phòng trà ca nhạc tại Hà Nội Like Coffee 32 Hào Nam": "Like Coffee"   # "32 Hào Nam" là địa chỉ, không phải tên
+  "Phòng trà Hà Nội Phố": "Hà Nội Phố"                                   # "Hà Nội" ở đây là một phần của tên quán
+
+# Tên chuẩn (sau khi áp alias) mà bạn chắc chắn là CÙNG một quán dù địa chỉ hai nguồn ghi khác hẳn nhau.
+# Mặc định merge chỉ gộp khi tên khớp VÀ địa chỉ không mâu thuẫn.
+force_merge: []
+#  - "Hay Bar"
